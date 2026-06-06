@@ -2,7 +2,10 @@ import type { NextConfig } from "next";
 
 const repositoryName =
   process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "world-cup-26-bracket";
-const basePath = process.env.GITHUB_ACTIONS === "true" ? `/${repositoryName}` : "";
+const isGitHubPagesBuild = process.env.GITHUB_ACTIONS === "true";
+const isUserSite = repositoryName.endsWith(".github.io");
+const basePath =
+  isGitHubPagesBuild && !isUserSite ? `/${repositoryName}` : "";
 
 const nextConfig: NextConfig = {
   output: "export",

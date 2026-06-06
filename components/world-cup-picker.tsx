@@ -60,6 +60,9 @@ type SavedState = {
 
 const STORAGE_KEY = "world-cup-2026-picker:v1";
 const MATCH_BY_ID = new Map(MATCHES.map((match) => [match.id, match]));
+const GROUP_BY_ID = new Map(GROUPS.map((group) => [group.id, group]));
+const GROUP_IDS = new Set(GROUPS.map((group) => group.id));
+const TEAM_IDS = new Set(TEAMS.keys());
 const CONFETTI_COLORS = ["#f2c94c", "#20d477", "#ffffff", "#e83e4d", "#4f8cff"];
 const CONFETTI_PARTICLES = Array.from({ length: 42 }, (_, index) => ({
   color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
@@ -133,6 +136,90 @@ const BRACKET_WINGS = {
     { label: "Round of 32", matches: [76, 78, 79, 80, 86, 88, 85, 87] },
   ],
 } as const;
+const STAGES: { id: Stage; label: string; number: number }[] = [
+  { id: "groups", label: "Groups", number: 1 },
+  { id: "bracket", label: "Knockout", number: 2 },
+  { id: "finish", label: "Finish", number: 3 },
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getMatch(matchId: number): MatchDefinition {
+  const match = MATCH_BY_ID.get(matchId);
+  if (!match) throw new Error(`Unknown match ${matchId}`);
+  return match;
+}
+
+function getTeam(teamId: string) {
+  const team = TEAMS.get(teamId);
+  if (!team) throw new Error(`Unknown team ${teamId}`);
+  return team;
+}
+
+function parseSavedState(value: unknown): SavedState | null {
+  if (!isRecord(value)) return null;
+
+  const rankings: Rankings = {};
+  if (isRecord(value.rankings)) {
+    for (const [groupId, ranking] of Object.entries(value.rankings)) {
+      const group = GROUP_BY_ID.get(groupId);
+      if (!group || !Array.isArray(ranking)) continue;
+
+      const groupTeamIds = new Set(group.teams.map((team) => team.id));
+      rankings[groupId] = [
+        ...new Set(
+          ranking.filter(
+            (teamId): teamId is string =>
+              typeof teamId === "string" && groupTeamIds.has(teamId),
+          ),
+        ),
+      ].slice(0, group.teams.length);
+    }
+  }
+
+  const thirdPlaceGroups = Array.isArray(value.thirdPlaceGroups)
+    ? [
+        ...new Set(
+          value.thirdPlaceGroups.filter(
+            (groupId): groupId is string =>
+              typeof groupId === "string" &&
+              GROUP_IDS.has(groupId) &&
+              rankings[groupId]?.length === 4,
+          ),
+        ),
+      ].slice(0, 8)
+    : [];
+
+  const rawPicks: Picks = {};
+  if (isRecord(value.picks)) {
+    for (const [matchId, teamId] of Object.entries(value.picks)) {
+      const numericMatchId = Number(matchId);
+      if (
+        Number.isInteger(numericMatchId) &&
+        MATCH_BY_ID.has(numericMatchId) &&
+        typeof teamId === "string" &&
+        TEAM_IDS.has(teamId)
+      ) {
+        rawPicks[numericMatchId] = teamId;
+      }
+    }
+  }
+
+  const thirdAssignments = assignThirdPlaceGroups(thirdPlaceGroups);
+  return {
+    rankings,
+    thirdPlaceGroups,
+    picks: prunePicks(rawPicks, rankings, thirdAssignments),
+    goldenBoot:
+      typeof value.goldenBoot === "string" ? value.goldenBoot.slice(0, 80) : "",
+    goldenGlove:
+      typeof value.goldenGlove === "string"
+        ? value.goldenGlove.slice(0, 80)
+        : "",
+  };
+}
 
 function CountryFlag({
   teamId,
@@ -188,10 +275,11 @@ function SortableRankedTeam({
   index: number;
   onRemove: (teamId: string) => void;
 }) {
-  const team = TEAMS.get(teamId)!;
+  const team = getTeam(teamId);
   const {
     attributes,
     listeners,
+    setActivatorNodeRef,
     setNodeRef,
     transform,
     transition,
@@ -200,18 +288,21 @@ function SortableRankedTeam({
 
   return (
     <div
-      {...attributes}
       {...listeners}
-      aria-label={`Drag ${team.name} from position ${index + 1}`}
       className={`ranked-team rank-${index + 1}${isDragging ? " ranked-team--dragging" : ""}`}
       ref={setNodeRef}
-      role="button"
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      tabIndex={0}
     >
-      <span aria-hidden="true" className="drag-handle">
+      <button
+        {...attributes}
+        {...listeners}
+        aria-label={`Drag ${team.name} from position ${index + 1}`}
+        className="drag-handle"
+        ref={setActivatorNodeRef}
+        type="button"
+      >
         <GripVertical size={16} />
-      </span>
+      </button>
       <span className="rank-number">{index + 1}</span>
       <CountryFlag teamId={team.id} />
       <span className="team-name">{team.name}</span>
@@ -329,6 +420,7 @@ function MatchCard({
     <article className="match-card">
       {teams.map((teamId, index) => (
         <button
+          aria-pressed={selected === teamId}
           className={`match-team ${selected === teamId ? "match-team--picked" : ""}`}
           disabled={!teamId}
           key={`${match.id}-${index}`}
@@ -365,7 +457,7 @@ function BracketWing({
       <h3>{round.label}</h3>
       <div className="bracket-column__matches">
         {round.matches.map((matchId) => {
-          const match = MATCH_BY_ID.get(matchId)!;
+          const match = getMatch(matchId);
           return (
             <MatchCard
               key={match.id}
@@ -434,7 +526,7 @@ function PosterBracketWing({
         {round.matches.map((matchId) => (
           <PosterMatch
             key={matchId}
-            match={MATCH_BY_ID.get(matchId)!}
+            match={getMatch(matchId)}
             picks={picks}
             rankings={rankings}
             thirdAssignments={thirdAssignments}
@@ -471,7 +563,7 @@ function Poster({
       <header className="poster__header">
         <div>
           <h2>
-            World Cup <strong>26</strong> Pick'Ems
+            World Cup <strong>26</strong> {"Pick'Ems"}
           </h2>
         </div>
         {champion ? (
@@ -504,7 +596,7 @@ function Poster({
           <h3>Final</h3>
           <div className="poster-bracket__final-content">
             <PosterMatch
-              match={MATCH_BY_ID.get(104)!}
+              match={getMatch(104)}
               picks={picks}
               rankings={rankings}
               thirdAssignments={thirdAssignments}
@@ -622,6 +714,7 @@ export function WorldCupPicker() {
   const [goldenGlove, setGoldenGlove] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [confettiRun, setConfettiRun] = useState(0);
   const [posterPreview, setPosterPreview] = useState({
     height: 0,
@@ -638,15 +731,20 @@ export function WorldCupPicker() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
-          const saved = JSON.parse(raw) as SavedState;
-          setRankings(saved.rankings ?? {});
-          setThirdPlaceGroups(saved.thirdPlaceGroups ?? []);
-          setPicks(saved.picks ?? {});
-          setGoldenBoot(saved.goldenBoot ?? "");
-          setGoldenGlove(saved.goldenGlove ?? "");
+          const saved = parseSavedState(JSON.parse(raw));
+          if (!saved) throw new Error("Invalid saved prediction");
+          setRankings(saved.rankings);
+          setThirdPlaceGroups(saved.thirdPlaceGroups);
+          setPicks(saved.picks);
+          setGoldenBoot(saved.goldenBoot);
+          setGoldenGlove(saved.goldenGlove);
         }
       } catch {
-        localStorage.removeItem(STORAGE_KEY);
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch {
+          // Storage may be unavailable in restricted browsing contexts.
+        }
       }
       setHydrated(true);
     });
@@ -664,7 +762,11 @@ export function WorldCupPicker() {
       goldenBoot,
       goldenGlove,
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // Persistence is optional; the picker remains usable if storage is blocked.
+    }
   }, [goldenBoot, goldenGlove, hydrated, picks, rankings, thirdPlaceGroups]);
 
   useEffect(() => {
@@ -752,6 +854,7 @@ export function WorldCupPicker() {
 
   async function exportPoster() {
     if (!posterRef.current) return;
+    setExportError("");
     setExporting(true);
     try {
       const { toPng } = await import("html-to-image");
@@ -764,6 +867,8 @@ export function WorldCupPicker() {
       link.download = "world-cup-2026-prediction.png";
       link.href = dataUrl;
       link.click();
+    } catch {
+      setExportError("Could not create the image. Please try again.");
     } finally {
       setExporting(false);
     }
@@ -780,19 +885,13 @@ export function WorldCupPicker() {
     setStage("groups");
   }
 
-  const stages: { id: Stage; label: string; number: number }[] = [
-    { id: "groups", label: "Groups", number: 1 },
-    { id: "bracket", label: "Knockout", number: 2 },
-    { id: "finish", label: "Finish", number: 3 },
-  ];
-
   return (
     <main>
       {confettiRun ? <ChampionConfetti key={confettiRun} /> : null}
       <header className="site-header">
         <a className="brand" href="#top" aria-label="Road to 26 home">
           <span className="brand-mark">26</span>
-          <span>Pick'Ems</span>
+          <span>{"Pick'Ems"}</span>
         </a>
         <button className="ghost-button" onClick={resetAll} type="button">
           <Trash2 size={15} /> Reset
@@ -812,7 +911,7 @@ export function WorldCupPicker() {
       </div>
 
       <nav className="stage-nav" aria-label="Prediction stages">
-        {stages.map((item) => {
+        {STAGES.map((item) => {
           const active = stage === item.id;
           const complete =
             item.id === "groups"
@@ -828,6 +927,7 @@ export function WorldCupPicker() {
                 : false;
           return (
             <button
+              aria-current={active ? "step" : undefined}
               className={active ? "stage-tab stage-tab--active" : "stage-tab"}
               disabled={disabled}
               key={item.id}
@@ -898,6 +998,7 @@ export function WorldCupPicker() {
                 const selected = thirdPlaceGroups.includes(group.id);
                 return (
                   <button
+                    aria-pressed={selected}
                     className={
                       selected
                         ? "third-team third-team--selected"
@@ -958,13 +1059,11 @@ export function WorldCupPicker() {
                 <h3>Final</h3>
                 <div className="bracket-final__content">
                   <MatchCard
-                    match={MATCH_BY_ID.get(104)!}
-                    onPick={(teamId) =>
-                      pickWinner(MATCH_BY_ID.get(104)!, teamId)
-                    }
+                    match={getMatch(104)}
+                    onPick={(teamId) => pickWinner(getMatch(104), teamId)}
                     selected={picks[104]}
                     teams={resolveMatchTeams(
-                      MATCH_BY_ID.get(104)!,
+                      getMatch(104),
                       rankings,
                       picks,
                       thirdAssignments,
@@ -1026,7 +1125,7 @@ export function WorldCupPicker() {
           <div className="section-heading section-heading--center">
             <div>
               <h2>Complete your prediction</h2>
-              <p>Add award winnersthen download your predictions</p>
+              <p>Add award winners, then download your prediction.</p>
             </div>
           </div>
           <div className="award-form">
@@ -1035,6 +1134,7 @@ export function WorldCupPicker() {
                 Golden Boot winner <small>Optional</small>
               </span>
               <input
+                maxLength={80}
                 value={goldenBoot}
                 onChange={(event) => setGoldenBoot(event.target.value)}
                 placeholder="Player name"
@@ -1045,6 +1145,7 @@ export function WorldCupPicker() {
                 Golden Glove winner <small>Optional</small>
               </span>
               <input
+                maxLength={80}
                 value={goldenGlove}
                 onChange={(event) => setGoldenGlove(event.target.value)}
                 placeholder="Goalkeeper name"
@@ -1094,6 +1195,11 @@ export function WorldCupPicker() {
                 : "Download your prediction image"}
             </button>
           </div>
+          {exportError ? (
+            <p className="export-error" role="alert">
+              {exportError}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
