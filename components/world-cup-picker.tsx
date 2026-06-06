@@ -1,0 +1,1049 @@
+"use client";
+
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  GripVertical,
+  RotateCcw,
+  Trophy,
+} from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  assignThirdPlaceGroups,
+  prunePicks,
+  resolveMatchTeams,
+  type Picks,
+  type Rankings,
+} from "@/lib/bracket";
+import {
+  GROUPS,
+  MATCHES,
+  ROUND_ORDER,
+  TEAMS,
+  type Group,
+  type MatchDefinition,
+} from "@/lib/data";
+
+type Stage = "groups" | "bracket" | "finish";
+type SavedState = {
+  rankings: Rankings;
+  thirdPlaceGroups: string[];
+  picks: Picks;
+  goldenBoot: string;
+  goldenGlove: string;
+};
+
+const STORAGE_KEY = "world-cup-2026-picker:v1";
+const MATCH_BY_ID = new Map(MATCHES.map((match) => [match.id, match]));
+const FLAG_CODES: Record<string, string> = {
+  mex: "mx",
+  rsa: "za",
+  kor: "kr",
+  cze: "cz",
+  can: "ca",
+  bih: "ba",
+  qat: "qa",
+  sui: "ch",
+  bra: "br",
+  mar: "ma",
+  hai: "ht",
+  sco: "gb-sct",
+  usa: "us",
+  par: "py",
+  aus: "au",
+  tur: "tr",
+  ger: "de",
+  ecu: "ec",
+  civ: "ci",
+  cuw: "cw",
+  ned: "nl",
+  jpn: "jp",
+  tun: "tn",
+  swe: "se",
+  bel: "be",
+  egy: "eg",
+  irn: "ir",
+  nzl: "nz",
+  esp: "es",
+  uru: "uy",
+  ksa: "sa",
+  cpv: "cv",
+  fra: "fr",
+  sen: "sn",
+  nor: "no",
+  irq: "iq",
+  arg: "ar",
+  aut: "at",
+  alg: "dz",
+  jor: "jo",
+  por: "pt",
+  col: "co",
+  uzb: "uz",
+  cod: "cd",
+  eng: "gb-eng",
+  cro: "hr",
+  gha: "gh",
+  pan: "pa",
+};
+const BRACKET_WINGS = {
+  left: [
+    { label: "Round of 32", matches: [74, 77, 73, 75, 83, 84, 81, 82] },
+    { label: "Round of 16", matches: [89, 90, 93, 94] },
+    { label: "Quarter-finals", matches: [97, 98] },
+    { label: "Semi-final", matches: [101] },
+  ],
+  right: [
+    { label: "Semi-final", matches: [102] },
+    { label: "Quarter-finals", matches: [99, 100] },
+    { label: "Round of 16", matches: [91, 92, 95, 96] },
+    { label: "Round of 32", matches: [76, 78, 79, 80, 86, 88, 85, 87] },
+  ],
+} as const;
+
+function CountryFlag({
+  teamId,
+  className = "",
+}: {
+  teamId: string;
+  className?: string;
+}) {
+  const team = TEAMS.get(teamId);
+  const flagCode = FLAG_CODES[teamId];
+  if (!team || !flagCode) return null;
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  return (
+    // SVGs are bundled locally so flags also render in exported images.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      alt=""
+      aria-hidden="true"
+      className={`country-flag ${className}`}
+      height="18"
+      src={`${basePath}/flags/${flagCode}.svg`}
+      width="24"
+    />
+  );
+}
+
+function TeamLabel({
+  teamId,
+  compact = false,
+}: {
+  teamId: string;
+  compact?: boolean;
+}) {
+  const team = TEAMS.get(teamId);
+  if (!team) return <span>To be decided</span>;
+  return (
+    <>
+      <CountryFlag
+        className={compact ? "country-flag--compact" : ""}
+        teamId={teamId}
+      />
+      <span className="truncate">{team.name}</span>
+    </>
+  );
+}
+
+function SortableRankedTeam({
+  teamId,
+  index,
+  onRemove,
+}: {
+  teamId: string;
+  index: number;
+  onRemove: (teamId: string) => void;
+}) {
+  const team = TEAMS.get(teamId)!;
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: teamId });
+
+  return (
+    <div
+      {...attributes}
+      {...listeners}
+      aria-label={`Drag ${team.name} from position ${index + 1}`}
+      className={`ranked-team rank-${index + 1}${isDragging ? " ranked-team--dragging" : ""}`}
+      ref={setNodeRef}
+      role="button"
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      tabIndex={0}
+    >
+      <span aria-hidden="true" className="drag-handle">
+        <GripVertical size={16} />
+      </span>
+      <span className="rank-number">{index + 1}</span>
+      <CountryFlag teamId={team.id} />
+      <span className="team-name">{team.name}</span>
+      {team.host ? <span className="tag">Host</span> : null}
+      {team.debut ? <span className="tag tag--green">Debut</span> : null}
+      <button
+        aria-label={`Remove ${team.name} from position ${index + 1}`}
+        className="remove-ranked-team"
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove(team.id);
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        type="button"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function GroupCard({
+  group,
+  ranking,
+  onChoose,
+  onRemove,
+  onReorder,
+}: {
+  group: Group;
+  ranking: string[];
+  onChoose: (teamId: string) => void;
+  onRemove: (teamId: string) => void;
+  onReorder: (ranking: string[]) => void;
+}) {
+  const remaining = group.teams.filter((team) => !ranking.includes(team.id));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = ranking.indexOf(String(active.id));
+    const newIndex = ranking.indexOf(String(over.id));
+    if (oldIndex !== -1 && newIndex !== -1) {
+      onReorder(arrayMove(ranking, oldIndex, newIndex));
+    }
+  }
+
+  return (
+    <article className="group-card">
+      <div className="group-card__header">
+        <h3>Group {group.id}</h3>
+        {ranking.length === 4 ? (
+          <span className="done-label">
+            <Check size={13} /> Complete
+          </span>
+        ) : (
+          <span className="counter">{ranking.length}/4</span>
+        )}
+      </div>
+      <div className="ranking-list">
+        <DndContext
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+          sensors={sensors}
+        >
+          <SortableContext
+            items={ranking}
+            strategy={verticalListSortingStrategy}
+          >
+            {ranking.map((teamId, index) => (
+              <SortableRankedTeam
+                index={index}
+                key={teamId}
+                onRemove={onRemove}
+                teamId={teamId}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+        {remaining.map((team) => (
+          <button
+            className="unranked-team"
+            key={team.id}
+            onClick={() => onChoose(team.id)}
+            type="button"
+          >
+            <span className="plus">+</span>
+            <CountryFlag teamId={team.id} />
+            <span className="team-name">{team.name}</span>
+            <span className="choose-text">Pick {ranking.length + 1}</span>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function MatchCard({
+  match,
+  teams,
+  selected,
+  onPick,
+}: {
+  match: MatchDefinition;
+  teams: [string | null, string | null];
+  selected?: string;
+  onPick: (teamId: string) => void;
+}) {
+  return (
+    <article className="match-card">
+      {teams.map((teamId, index) => (
+        <button
+          className={`match-team ${selected === teamId ? "match-team--picked" : ""}`}
+          disabled={!teamId}
+          key={`${match.id}-${index}`}
+          onClick={() => teamId && onPick(teamId)}
+          type="button"
+        >
+          {teamId ? (
+            <TeamLabel teamId={teamId} compact />
+          ) : (
+            <span>Awaiting winner</span>
+          )}
+          {selected === teamId ? <Check size={14} /> : null}
+        </button>
+      ))}
+    </article>
+  );
+}
+
+function BracketWing({
+  side,
+  rankings,
+  picks,
+  thirdAssignments,
+  onPick,
+}: {
+  side: keyof typeof BRACKET_WINGS;
+  rankings: Rankings;
+  picks: Picks;
+  thirdAssignments: ReturnType<typeof assignThirdPlaceGroups>;
+  onPick: (match: MatchDefinition, teamId: string) => void;
+}) {
+  return BRACKET_WINGS[side].map((round) => (
+    <div className={`bracket-column bracket-column--${side}`} key={round.label}>
+      <h3>{round.label}</h3>
+      <div className="bracket-column__matches">
+        {round.matches.map((matchId) => {
+          const match = MATCH_BY_ID.get(matchId)!;
+          return (
+            <MatchCard
+              key={match.id}
+              match={match}
+              onPick={(teamId) => onPick(match, teamId)}
+              selected={picks[match.id]}
+              teams={resolveMatchTeams(
+                match,
+                rankings,
+                picks,
+                thirdAssignments,
+              )}
+            />
+          );
+        })}
+      </div>
+    </div>
+  ));
+}
+
+function PosterMatch({
+  match,
+  rankings,
+  picks,
+  thirdAssignments,
+}: {
+  match: MatchDefinition;
+  rankings: Rankings;
+  picks: Picks;
+  thirdAssignments: ReturnType<typeof assignThirdPlaceGroups>;
+}) {
+  const teams = resolveMatchTeams(match, rankings, picks, thirdAssignments);
+  return (
+    <div className="poster-match">
+      {teams.map((teamId, index) => (
+        <div
+          className={
+            picks[match.id] === teamId
+              ? "poster-match__team poster-match__team--picked"
+              : "poster-match__team"
+          }
+          key={`${match.id}-${index}`}
+        >
+          {teamId ? <TeamLabel teamId={teamId} compact /> : <span>-</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PosterBracketWing({
+  side,
+  rankings,
+  picks,
+  thirdAssignments,
+}: {
+  side: keyof typeof BRACKET_WINGS;
+  rankings: Rankings;
+  picks: Picks;
+  thirdAssignments: ReturnType<typeof assignThirdPlaceGroups>;
+}) {
+  return BRACKET_WINGS[side].map((round) => (
+    <div className="poster-bracket__column" key={round.label}>
+      <h3>{round.label}</h3>
+      <div className="poster-bracket__matches">
+        {round.matches.map((matchId) => (
+          <PosterMatch
+            key={matchId}
+            match={MATCH_BY_ID.get(matchId)!}
+            picks={picks}
+            rankings={rankings}
+            thirdAssignments={thirdAssignments}
+          />
+        ))}
+      </div>
+    </div>
+  ));
+}
+
+function Poster({
+  rankings,
+  picks,
+  thirdAssignments,
+  goldenBoot,
+  goldenGlove,
+}: {
+  rankings: Rankings;
+  picks: Picks;
+  thirdAssignments: ReturnType<typeof assignThirdPlaceGroups>;
+  goldenBoot: string;
+  goldenGlove: string;
+}) {
+  const champion = picks[104] ? TEAMS.get(picks[104]) : null;
+  const knockoutRounds = ROUND_ORDER.slice(1).map((round) => ({
+    round,
+    teams: MATCHES.filter((match) => match.round === round)
+      .map((match) => picks[match.id])
+      .filter(Boolean),
+  }));
+
+  return (
+    <div className="poster">
+      <header className="poster__header">
+        <div>
+          <h2>
+            World Cup <strong>26</strong> Pick'Ems
+          </h2>
+        </div>
+      </header>
+      <section className="poster__groups">
+        {GROUPS.map((group) => (
+          <div className="poster-group" key={group.id}>
+            <h3>Group {group.id}</h3>
+            {(rankings[group.id] ?? []).map((teamId, index) => (
+              <div className="poster-team" key={teamId}>
+                <span>{index + 1}</span>
+                <TeamLabel teamId={teamId} compact />
+              </div>
+            ))}
+          </div>
+        ))}
+      </section>
+      <section className="poster__knockout">
+        <PosterBracketWing
+          picks={picks}
+          rankings={rankings}
+          side="left"
+          thirdAssignments={thirdAssignments}
+        />
+        <div className="poster-bracket__final">
+          <h3>Final</h3>
+          <div className="poster-bracket__final-content">
+            <PosterMatch
+              match={MATCH_BY_ID.get(104)!}
+              picks={picks}
+              rankings={rankings}
+              thirdAssignments={thirdAssignments}
+            />
+            <Trophy size={34} />
+            <div className="poster__champion">
+              <span>Champion</span>
+              {champion ? (
+                <>
+                  <CountryFlag
+                    className="country-flag--champion"
+                    teamId={champion.id}
+                  />
+                  <strong>{champion.name}</strong>
+                </>
+              ) : (
+                <strong>To be decided</strong>
+              )}
+            </div>
+          </div>
+        </div>
+        <PosterBracketWing
+          picks={picks}
+          rankings={rankings}
+          side="right"
+          thirdAssignments={thirdAssignments}
+        />
+      </section>
+      <section className="poster__knockout-summary">
+        <div className="poster__round poster__round--r32">
+          <h3>Round of 32 winners</h3>
+          <div className="poster__team-grid">
+            {MATCHES.filter((match) => match.round === "Round of 32").map(
+              (match) => (
+                <div className="poster-pick" key={match.id}>
+                  {picks[match.id] ? (
+                    <TeamLabel teamId={picks[match.id]} compact />
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              ),
+            )}
+          </div>
+        </div>
+        {knockoutRounds.map(({ round, teams }) => (
+          <div className="poster__round" key={round}>
+            <h3>{round === "Final" ? "Champion" : `${round} winners`}</h3>
+            {round === "Final" && champion ? (
+              <div className="poster__champion">
+                <Trophy size={42} />
+                <CountryFlag
+                  className="country-flag--champion"
+                  teamId={champion.id}
+                />
+                <strong>{champion.name}</strong>
+              </div>
+            ) : (
+              <div className="poster__team-grid">
+                {teams.map((teamId, index) => (
+                  <div
+                    className="poster-pick"
+                    key={`${round}-${teamId}-${index}`}
+                  >
+                    <TeamLabel teamId={teamId} compact />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </section>
+      <footer className="poster__awards">
+        <div>
+          <span>Golden Boot:</span>
+          <strong>{goldenBoot || "—"}</strong>
+        </div>
+        <div>
+          <span>Golden Glove:</span>
+          <strong>{goldenGlove || "—"}</strong>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+export function WorldCupPicker() {
+  const [stage, setStage] = useState<Stage>("groups");
+  const [rankings, setRankings] = useState<Rankings>({});
+  const [thirdPlaceGroups, setThirdPlaceGroups] = useState<string[]>([]);
+  const [picks, setPicks] = useState<Picks>({});
+  const [goldenBoot, setGoldenBoot] = useState("");
+  const [goldenGlove, setGoldenGlove] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [posterPreview, setPosterPreview] = useState({
+    height: 0,
+    scale: 1,
+  });
+  const posterShellRef = useRef<HTMLDivElement>(null);
+  const posterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as SavedState;
+          setRankings(saved.rankings ?? {});
+          setThirdPlaceGroups(saved.thirdPlaceGroups ?? []);
+          setPicks(saved.picks ?? {});
+          setGoldenBoot(saved.goldenBoot ?? "");
+          setGoldenGlove(saved.goldenGlove ?? "");
+        }
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      setHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const state: SavedState = {
+      rankings,
+      thirdPlaceGroups,
+      picks,
+      goldenBoot,
+      goldenGlove,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [goldenBoot, goldenGlove, hydrated, picks, rankings, thirdPlaceGroups]);
+
+  useEffect(() => {
+    if (stage !== "finish" || !posterShellRef.current || !posterRef.current)
+      return;
+
+    const shell = posterShellRef.current;
+    const poster = posterRef.current;
+    const updatePreview = () => {
+      const scale = Math.min(1, shell.clientWidth / 1600);
+      setPosterPreview({
+        height: poster.scrollHeight * scale,
+        scale,
+      });
+    };
+    const observer = new ResizeObserver(updatePreview);
+    observer.observe(shell);
+    observer.observe(poster);
+    updatePreview();
+    return () => observer.disconnect();
+  }, [stage]);
+
+  const completedGroups = GROUPS.filter(
+    (group) => rankings[group.id]?.length === 4,
+  ).length;
+  const groupsComplete = completedGroups === GROUPS.length;
+  const thirdAssignments = useMemo(
+    () => assignThirdPlaceGroups(thirdPlaceGroups),
+    [thirdPlaceGroups],
+  );
+  const bracketReady =
+    groupsComplete &&
+    thirdPlaceGroups.length === 8 &&
+    Boolean(thirdAssignments);
+  const bracketComplete = MATCHES.every((match) => Boolean(picks[match.id]));
+
+  function updateRanking(groupId: string, nextRanking: string[]) {
+    const next = { ...rankings, [groupId]: nextRanking };
+    const assignments = assignThirdPlaceGroups(thirdPlaceGroups);
+    setRankings(next);
+    setPicks((current) => prunePicks(current, next, assignments));
+  }
+
+  function chooseTeam(groupId: string, teamId: string) {
+    const current = rankings[groupId] ?? [];
+    if (current.length < 4 && !current.includes(teamId)) {
+      updateRanking(groupId, [...current, teamId]);
+    }
+  }
+
+  function toggleThirdPlace(groupId: string) {
+    const isSelected = thirdPlaceGroups.includes(groupId);
+    if (!isSelected && thirdPlaceGroups.length === 8) return;
+    const next = isSelected
+      ? thirdPlaceGroups.filter((id) => id !== groupId)
+      : [...thirdPlaceGroups, groupId];
+    const assignments = assignThirdPlaceGroups(next);
+    setThirdPlaceGroups(next);
+    setPicks((current) => prunePicks(current, rankings, assignments));
+  }
+
+  function pickWinner(match: MatchDefinition, teamId: string) {
+    const next = { ...picks, [match.id]: teamId };
+    setPicks(prunePicks(next, rankings, thirdAssignments));
+  }
+
+  async function exportPoster() {
+    if (!posterRef.current) return;
+    setExporting(true);
+    try {
+      const { toPng } = await import("html-to-image");
+      const dataUrl = await toPng(posterRef.current, {
+        cacheBust: true,
+        pixelRatio: 1.5,
+        backgroundColor: "#07110f",
+      });
+      const link = document.createElement("a");
+      link.download = "world-cup-2026-prediction.png";
+      link.href = dataUrl;
+      link.click();
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function resetAll() {
+    if (!window.confirm("Clear your entire prediction and start again?"))
+      return;
+    setRankings({});
+    setThirdPlaceGroups([]);
+    setPicks({});
+    setGoldenBoot("");
+    setGoldenGlove("");
+    setStage("groups");
+  }
+
+  const stages: { id: Stage; label: string; number: number }[] = [
+    { id: "groups", label: "Groups", number: 1 },
+    { id: "bracket", label: "Knockout", number: 2 },
+    { id: "finish", label: "Finish", number: 3 },
+  ];
+
+  return (
+    <main>
+      <header className="site-header">
+        <a className="brand" href="#top" aria-label="Road to 26 home">
+          <span className="brand-mark">26</span>
+          <span>
+            Road to <strong>26</strong>
+          </span>
+        </a>
+        <button className="ghost-button" onClick={resetAll} type="button">
+          <RotateCcw size={15} /> Reset
+        </button>
+      </header>
+
+      <div id="top" className="hero">
+        <h1>
+          Call every group.
+          <br />
+          <em>Crown your champion.</em>
+        </h1>
+        <p>
+          Rank all 12 groups, build the knockout bracket, and share your
+          prediction.
+        </p>
+      </div>
+
+      <nav className="stage-nav" aria-label="Prediction stages">
+        {stages.map((item) => {
+          const active = stage === item.id;
+          const complete =
+            item.id === "groups"
+              ? bracketReady
+              : item.id === "bracket"
+                ? bracketComplete
+                : false;
+          const disabled =
+            item.id === "bracket"
+              ? !bracketReady
+              : item.id === "finish"
+                ? !bracketComplete
+                : false;
+          return (
+            <button
+              className={active ? "stage-tab stage-tab--active" : "stage-tab"}
+              disabled={disabled}
+              key={item.id}
+              onClick={() => setStage(item.id)}
+              type="button"
+            >
+              <span>{complete ? <Check size={14} /> : item.number}</span>
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {stage === "groups" ? (
+        <section className="content-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Stage one</span>
+              <h2>Rank the groups</h2>
+              <p>
+                Tap teams to rank them, then drag the handle to reorder. Use ×
+                to remove a team.
+              </p>
+            </div>
+            <div className="progress-stat">
+              <strong>{completedGroups}</strong>
+              <span>of 12 complete</span>
+            </div>
+          </div>
+          <div className="groups-grid">
+            {GROUPS.map((group) => (
+              <GroupCard
+                group={group}
+                key={group.id}
+                ranking={rankings[group.id] ?? []}
+                onChoose={(teamId) => chooseTeam(group.id, teamId)}
+                onRemove={(teamId) =>
+                  updateRanking(
+                    group.id,
+                    (rankings[group.id] ?? []).filter((id) => id !== teamId),
+                  )
+                }
+                onReorder={(nextRanking) =>
+                  updateRanking(group.id, nextRanking)
+                }
+              />
+            ))}
+          </div>
+
+          <section
+            className={
+              groupsComplete
+                ? "third-place-panel"
+                : "third-place-panel third-place-panel--locked"
+            }
+          >
+            <div className="third-place-copy">
+              <span className="eyebrow">The final eight</span>
+              <h2>Best third-place teams</h2>
+              <p>
+                Select the eight third-place finishers you predict will reach
+                the Round of 32.
+              </p>
+            </div>
+            <div className="third-place-count">
+              <strong>{thirdPlaceGroups.length}</strong>/8 selected
+            </div>
+            <div className="third-place-grid">
+              {GROUPS.map((group) => {
+                const teamId = rankings[group.id]?.[2];
+                const selected = thirdPlaceGroups.includes(group.id);
+                return (
+                  <button
+                    className={
+                      selected
+                        ? "third-team third-team--selected"
+                        : "third-team"
+                    }
+                    disabled={!groupsComplete || !teamId}
+                    key={group.id}
+                    onClick={() => toggleThirdPlace(group.id)}
+                    type="button"
+                  >
+                    <span className="third-team__group">{group.id}</span>
+                    {teamId ? (
+                      <TeamLabel teamId={teamId} compact />
+                    ) : (
+                      <span>Rank group first</span>
+                    )}
+                    {selected ? <Check size={15} /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="section-actions">
+            <button
+              className="primary-button"
+              disabled={!bracketReady}
+              onClick={() => {
+                setStage("bracket");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              type="button"
+            >
+              Build my bracket <ChevronRight size={18} />
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {stage === "bracket" ? (
+        <section className="content-section content-section--wide">
+          <div className="section-heading section-heading--center">
+            <div>
+              <h2>Choose every winner</h2>
+              <p>Start at the round of 32 and work toward the final.</p>
+            </div>
+          </div>
+          <div className="bracket-scroll">
+            <div className="bracket">
+              <BracketWing
+                onPick={pickWinner}
+                picks={picks}
+                rankings={rankings}
+                side="left"
+                thirdAssignments={thirdAssignments}
+              />
+              <div className="bracket-final">
+                <h3>Final</h3>
+                <div className="bracket-final__content">
+                  <MatchCard
+                    match={MATCH_BY_ID.get(104)!}
+                    onPick={(teamId) =>
+                      pickWinner(MATCH_BY_ID.get(104)!, teamId)
+                    }
+                    selected={picks[104]}
+                    teams={resolveMatchTeams(
+                      MATCH_BY_ID.get(104)!,
+                      rankings,
+                      picks,
+                      thirdAssignments,
+                    )}
+                  />
+                  <Trophy size={38} />
+                  <div
+                    className={
+                      picks[104]
+                        ? "bracket-champion bracket-champion--selected"
+                        : "bracket-champion"
+                    }
+                  >
+                    <span>Champion</span>
+                    {picks[104] ? (
+                      <strong>
+                        <TeamLabel teamId={picks[104]} />
+                      </strong>
+                    ) : (
+                      <strong>To be decided</strong>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <BracketWing
+                onPick={pickWinner}
+                picks={picks}
+                rankings={rankings}
+                side="right"
+                thirdAssignments={thirdAssignments}
+              />
+            </div>
+          </div>
+          <div className="section-actions section-actions--split">
+            <button
+              className="secondary-button"
+              onClick={() => setStage("groups")}
+              type="button"
+            >
+              <ChevronLeft size={18} /> Edit groups
+            </button>
+            <button
+              className="primary-button"
+              disabled={!bracketComplete}
+              onClick={() => {
+                setStage("finish");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              type="button"
+            >
+              Add awards <ChevronRight size={18} />
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {stage === "finish" ? (
+        <section className="content-section finish-section">
+          <div className="section-heading section-heading--center">
+            <div>
+              <span className="eyebrow">Final whistle</span>
+              <h2>Complete your prediction</h2>
+              <p>
+                Optionally add award winners, preview your card, then download
+                it as an image.
+              </p>
+            </div>
+          </div>
+          <div className="award-form">
+            <label>
+              <span>
+                Golden Boot winner <small>Optional</small>
+              </span>
+              <input
+                value={goldenBoot}
+                onChange={(event) => setGoldenBoot(event.target.value)}
+                placeholder="Player name"
+              />
+            </label>
+            <label>
+              <span>
+                Golden Glove winner <small>Optional</small>
+              </span>
+              <input
+                value={goldenGlove}
+                onChange={(event) => setGoldenGlove(event.target.value)}
+                placeholder="Goalkeeper name"
+              />
+            </label>
+          </div>
+          <div className="poster-shell" ref={posterShellRef}>
+            <div
+              className="poster-preview"
+              style={{ height: posterPreview.height || undefined }}
+            >
+              <div
+                className="poster-preview__scale"
+                style={{
+                  transform: `translateX(-50%) scale(${posterPreview.scale})`,
+                }}
+              >
+                <div ref={posterRef}>
+                  <Poster
+                    goldenBoot={goldenBoot}
+                    goldenGlove={goldenGlove}
+                    picks={picks}
+                    rankings={rankings}
+                    thirdAssignments={thirdAssignments}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="section-actions section-actions--split">
+            <button
+              className="secondary-button"
+              onClick={() => setStage("bracket")}
+              type="button"
+            >
+              <ChevronLeft size={18} /> Edit bracket
+            </button>
+            <button
+              className="primary-button"
+              disabled={exporting}
+              onClick={exportPoster}
+              type="button"
+            >
+              <Download size={18} />{" "}
+              {exporting ? "Creating image..." : "Download prediction"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <footer className="site-footer">
+        <span>Unofficial World Cup 2026 predictor</span>
+        <span>Groups and bracket verified against FIFA match schedule</span>
+      </footer>
+    </main>
+  );
+}
