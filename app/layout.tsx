@@ -14,8 +14,8 @@ const body = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Road to 26 | World Cup Predictor",
-  description: "Build and export your FIFA World Cup 2026 prediction.",
+  title: "World Cup Pick'Ems",
+  description: "Build and export your FIFA World Cup 2026 predictions.",
 };
 
 export default function RootLayout({

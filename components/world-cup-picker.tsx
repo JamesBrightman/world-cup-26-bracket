@@ -6,7 +6,7 @@ import {
   ChevronRight,
   Download,
   GripVertical,
-  RotateCcw,
+  Trash2,
   Trophy,
 } from "lucide-react";
 import {
@@ -26,7 +26,13 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   assignThirdPlaceGroups,
   prunePicks,
@@ -54,6 +60,15 @@ type SavedState = {
 
 const STORAGE_KEY = "world-cup-2026-picker:v1";
 const MATCH_BY_ID = new Map(MATCHES.map((match) => [match.id, match]));
+const CONFETTI_COLORS = ["#f2c94c", "#20d477", "#ffffff", "#e83e4d", "#4f8cff"];
+const CONFETTI_PARTICLES = Array.from({ length: 42 }, (_, index) => ({
+  color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
+  delay: `${(index % 7) * 0.05}s`,
+  drift: `${((index * 47) % 220) - 110}px`,
+  duration: `${1.9 + (index % 6) * 0.15}s`,
+  left: `${(index * 37) % 100}%`,
+  spin: `${360 + (index % 5) * 180}deg`,
+}));
 const FLAG_CODES: Record<string, string> = {
   mex: "mx",
   rsa: "za",
@@ -159,7 +174,7 @@ function TeamLabel({
         className={compact ? "country-flag--compact" : ""}
         teamId={teamId}
       />
-      <span className="truncate">{team.name}</span>
+      <span className="truncate font-medium">{team.name}</span>
     </>
   );
 }
@@ -255,7 +270,7 @@ function GroupCard({
         <h3>Group {group.id}</h3>
         {ranking.length === 4 ? (
           <span className="done-label">
-            <Check size={13} /> Complete
+            <Check size={16} /> Complete
           </span>
         ) : (
           <span className="counter">{ranking.length}/4</span>
@@ -459,6 +474,11 @@ function Poster({
             World Cup <strong>26</strong> Pick'Ems
           </h2>
         </div>
+        {champion ? (
+          <div className="poster__header-champion">
+            <span aria-hidden="true">🏆</span> {champion.name}
+          </div>
+        ) : null}
       </header>
       <section className="poster__groups">
         {GROUPS.map((group) => (
@@ -571,6 +591,28 @@ function Poster({
   );
 }
 
+function ChampionConfetti() {
+  return (
+    <div aria-hidden="true" className="champion-confetti">
+      {CONFETTI_PARTICLES.map((particle, index) => (
+        <span
+          key={index}
+          style={
+            {
+              "--confetti-drift": particle.drift,
+              "--confetti-spin": particle.spin,
+              animationDelay: particle.delay,
+              animationDuration: particle.duration,
+              backgroundColor: particle.color,
+              left: particle.left,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
 export function WorldCupPicker() {
   const [stage, setStage] = useState<Stage>("groups");
   const [rankings, setRankings] = useState<Rankings>({});
@@ -580,12 +622,14 @@ export function WorldCupPicker() {
   const [goldenGlove, setGoldenGlove] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [confettiRun, setConfettiRun] = useState(0);
   const [posterPreview, setPosterPreview] = useState({
     height: 0,
     scale: 1,
   });
   const posterShellRef = useRef<HTMLDivElement>(null);
   const posterRef = useRef<HTMLDivElement>(null);
+  const confettiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -643,6 +687,15 @@ export function WorldCupPicker() {
     return () => observer.disconnect();
   }, [stage]);
 
+  useEffect(
+    () => () => {
+      if (confettiTimeoutRef.current) {
+        clearTimeout(confettiTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
   const completedGroups = GROUPS.filter(
     (group) => rankings[group.id]?.length === 4,
   ).length;
@@ -685,6 +738,16 @@ export function WorldCupPicker() {
   function pickWinner(match: MatchDefinition, teamId: string) {
     const next = { ...picks, [match.id]: teamId };
     setPicks(prunePicks(next, rankings, thirdAssignments));
+    if (match.id === 104 && picks[104] !== teamId) {
+      if (confettiTimeoutRef.current) {
+        clearTimeout(confettiTimeoutRef.current);
+      }
+      setConfettiRun((run) => run + 1);
+      confettiTimeoutRef.current = setTimeout(() => {
+        setConfettiRun(0);
+        confettiTimeoutRef.current = null;
+      }, 2800);
+    }
   }
 
   async function exportPoster() {
@@ -725,15 +788,14 @@ export function WorldCupPicker() {
 
   return (
     <main>
+      {confettiRun ? <ChampionConfetti key={confettiRun} /> : null}
       <header className="site-header">
         <a className="brand" href="#top" aria-label="Road to 26 home">
           <span className="brand-mark">26</span>
-          <span>
-            Road to <strong>26</strong>
-          </span>
+          <span>Pick'Ems</span>
         </a>
         <button className="ghost-button" onClick={resetAll} type="button">
-          <RotateCcw size={15} /> Reset
+          <Trash2 size={15} /> Reset
         </button>
       </header>
 
@@ -741,7 +803,7 @@ export function WorldCupPicker() {
         <h1>
           Call every group.
           <br />
-          <em>Crown your champion.</em>
+          <em>Crown your World Cup champion.</em>
         </h1>
         <p>
           Rank all 12 groups, build the knockout bracket, and share your
@@ -783,11 +845,9 @@ export function WorldCupPicker() {
         <section className="content-section">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Stage one</span>
-              <h2>Rank the groups</h2>
-              <p>
-                Tap teams to rank them, then drag the handle to reorder. Use ×
-                to remove a team.
+              <h2>Group stage</h2>
+              <p className="mobile-ranking-help">
+                Tap teams to rank. Drag to reorder.
               </p>
             </div>
             <div className="progress-stat">
@@ -823,7 +883,6 @@ export function WorldCupPicker() {
             }
           >
             <div className="third-place-copy">
-              <span className="eyebrow">The final eight</span>
               <h2>Best third-place teams</h2>
               <p>
                 Select the eight third-place finishers you predict will reach
@@ -864,7 +923,7 @@ export function WorldCupPicker() {
 
           <div className="section-actions">
             <button
-              className="primary-button"
+              className="primary-button text-lg"
               disabled={!bracketReady}
               onClick={() => {
                 setStage("bracket");
@@ -872,7 +931,7 @@ export function WorldCupPicker() {
               }}
               type="button"
             >
-              Build my bracket <ChevronRight size={18} />
+              Knockout Stage <ChevronRight size={18} />
             </button>
           </div>
         </section>
@@ -956,7 +1015,7 @@ export function WorldCupPicker() {
               }}
               type="button"
             >
-              Add awards <ChevronRight size={18} />
+              Finish up <ChevronRight size={18} />
             </button>
           </div>
         </section>
@@ -966,12 +1025,8 @@ export function WorldCupPicker() {
         <section className="content-section finish-section">
           <div className="section-heading section-heading--center">
             <div>
-              <span className="eyebrow">Final whistle</span>
               <h2>Complete your prediction</h2>
-              <p>
-                Optionally add award winners, preview your card, then download
-                it as an image.
-              </p>
+              <p>Add award winnersthen download your predictions</p>
             </div>
           </div>
           <div className="award-form">
@@ -1034,7 +1089,9 @@ export function WorldCupPicker() {
               type="button"
             >
               <Download size={18} />{" "}
-              {exporting ? "Creating image..." : "Download prediction"}
+              {exporting
+                ? "Creating image..."
+                : "Download your prediction image"}
             </button>
           </div>
         </section>
