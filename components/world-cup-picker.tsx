@@ -231,7 +231,6 @@ function CountryFlag({
   const team = TEAMS.get(teamId);
   const flagCode = FLAG_CODES[teamId];
   if (!team || !flagCode) return null;
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   return (
     // SVGs are bundled locally so flags also render in exported images.
     // eslint-disable-next-line @next/next/no-img-element
@@ -240,9 +239,19 @@ function CountryFlag({
       aria-hidden="true"
       className={`country-flag ${className}`}
       height="18"
-      src={`${basePath}/flags/${flagCode}.svg`}
+      src={`flags/${flagCode}.svg`}
       width="24"
     />
+  );
+}
+
+async function waitForPosterAssets(element: HTMLElement) {
+  await document.fonts.ready;
+  await Promise.all(
+    Array.from(element.querySelectorAll("img")).map((image) => {
+      if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+      return image.decode();
+    }),
   );
 }
 
@@ -857,11 +866,13 @@ export function WorldCupPicker() {
     setExportError("");
     setExporting(true);
     try {
+      await waitForPosterAssets(posterRef.current);
       const { toPng } = await import("html-to-image");
       const dataUrl = await toPng(posterRef.current, {
         cacheBust: true,
         pixelRatio: 1.5,
         backgroundColor: "#07110f",
+        skipAutoScale: true,
       });
       const link = document.createElement("a");
       link.download = "world-cup-2026-prediction.png";
