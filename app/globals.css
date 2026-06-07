@@ -268,19 +268,14 @@ button:disabled {
 .ranked-team {
   background: #172420;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  cursor: grab;
   grid-template-columns: 24px 28px 28px minmax(0, 1fr) auto auto;
   padding: 5px 7px 5px 4px;
   position: relative;
-  touch-action: none;
   user-select: none;
   z-index: 0;
 }
 .ranked-team:hover {
   border-color: rgba(255, 255, 255, 0.25);
-}
-.ranked-team:active {
-  cursor: grabbing;
 }
 .ranked-team--dragging {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.38);
@@ -954,6 +949,15 @@ button:disabled {
   }
   .award-form {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 641px) {
+  .ranked-team {
+    cursor: grab;
+  }
+  .ranked-team:active {
+    cursor: grabbing;
   }
 }
 

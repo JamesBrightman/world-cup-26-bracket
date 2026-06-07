@@ -32,6 +32,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   assignThirdPlaceGroups,
@@ -295,10 +296,16 @@ function SortableRankedTeam({
     isDragging,
   } = useSortable({ id: teamId });
 
+  function handleRowPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (window.matchMedia("(max-width: 640px)").matches) return;
+    if ((event.target as Element).closest("button")) return;
+    listeners?.onPointerDown?.(event);
+  }
+
   return (
     <div
-      {...listeners}
       className={`ranked-team rank-${index + 1}${isDragging ? " ranked-team--dragging" : ""}`}
+      onPointerDown={handleRowPointerDown}
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
