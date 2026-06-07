@@ -2,14 +2,14 @@
 
 :root {
   --ink: #f4f1e8;
-  --muted: #9baca5;
+  --muted: #b4c3bd;
   --green: #20d477;
   --green-dark: #0e9d56;
   --gold: #f2c94c;
-  --surface: #101b18;
-  --surface-2: #14231f;
-  --line: rgba(255, 255, 255, 0.11);
-  --background: #07110f;
+  --surface: #172824;
+  --surface-2: #1d302b;
+  --line: rgba(255, 255, 255, 0.16);
+  --background: #0b1d19;
 }
 
 * {
@@ -23,15 +23,17 @@ body {
   background:
     radial-gradient(
       circle at 15% 0%,
-      rgba(23, 117, 76, 0.2),
-      transparent 28rem
+      rgba(32, 212, 119, 0.2),
+      transparent 32rem
     ),
     radial-gradient(
       circle at 95% 30%,
-      rgba(242, 201, 76, 0.06),
-      transparent 24rem
+      rgba(242, 201, 76, 0.09),
+      transparent 28rem
     ),
+    linear-gradient(150deg, #102a23 0%, #0b1d19 52%, #12231f 100%),
     var(--background);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font-body), sans-serif;
 }
@@ -55,7 +57,7 @@ button:disabled {
 .site-header {
   align-items: center;
   backdrop-filter: blur(16px);
-  background: rgba(7, 17, 15, 0.82);
+  background: rgba(11, 29, 25, 0.84);
   border-bottom: 1px solid var(--line);
   display: flex;
   height: 68px;
@@ -156,7 +158,7 @@ button:disabled {
 }
 .stage-tab > span {
   align-items: center;
-  background: #24312d;
+  background: #30423c;
   border-radius: 50%;
   display: inline-flex;
   font-size: 14px;
@@ -221,8 +223,8 @@ button:disabled {
   align-self: start;
   background: linear-gradient(
     145deg,
-    rgba(20, 35, 31, 0.96),
-    rgba(12, 24, 21, 0.96)
+    rgba(29, 48, 43, 0.96),
+    rgba(20, 39, 34, 0.96)
   );
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -266,8 +268,8 @@ button:disabled {
   text-align: left;
 }
 .ranked-team {
-  background: #172420;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: #21342f;
+  border: 1px solid rgba(255, 255, 255, 0.13);
   grid-template-columns: 24px 28px 28px minmax(0, 1fr) auto auto;
   padding: 5px 7px 5px 4px;
   position: relative;
@@ -287,7 +289,7 @@ button:disabled {
   align-items: center;
   background: transparent;
   border: 0;
-  color: #64736d;
+  color: #81968e;
   display: flex;
   height: 32px;
   justify-content: center;
@@ -403,8 +405,8 @@ button:disabled {
   color: var(--green);
 }
 .unranked-team {
-  background: transparent;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.018);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
   color: var(--muted);
   cursor: pointer;
   grid-template-columns: 28px 28px 1fr auto;
@@ -426,8 +428,8 @@ button:disabled {
 .third-place-panel {
   background: linear-gradient(
     120deg,
-    rgba(248, 233, 24, 0.08),
-    rgba(35, 28, 20, 0.85)
+    rgba(242, 201, 76, 0.1),
+    rgba(30, 45, 39, 0.92)
   );
   border: 1px solid rgba(32, 212, 119, 0.25);
   border-radius: 16px;
@@ -466,7 +468,7 @@ button:disabled {
 }
 .third-team {
   align-items: center;
-  background: rgba(5, 15, 12, 0.6);
+  background: rgba(20, 43, 36, 0.76);
   border: 1px solid var(--line);
   border-radius: 8px;
   cursor: pointer;
@@ -576,7 +578,7 @@ button:disabled {
   position: relative;
 }
 .match-number {
-  color: #64736d;
+  color: #81968e;
   font: 700 10px/1 var(--font-display);
   position: absolute;
   right: 6px;
@@ -693,7 +695,9 @@ button:disabled {
   width: 1600px;
 }
 .poster {
-  background: #07110f;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(32, 212, 119, 0.12), transparent 440px),
+    linear-gradient(150deg, #102a23, #0b1d19 56%, #12231f);
   color: #f4f1e8;
   font-family: var(--font-body), sans-serif;
   min-height: 900px;
@@ -730,13 +734,13 @@ button:disabled {
   margin-top: 28px;
 }
 .poster-group {
-  background: #101b18;
+  background: #172824;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   overflow: hidden;
 }
 .poster-group h3 {
-  background: #14231f;
+  background: #1d302b;
   color: #f2c94c;
   font: 800 18px/1 var(--font-display);
   letter-spacing: 0.03em;
@@ -789,7 +793,7 @@ button:disabled {
   justify-content: space-around;
 }
 .poster-match {
-  background: #0c1714;
+  background: #13241f;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 5px;
   overflow: hidden;
@@ -826,7 +830,7 @@ button:disabled {
   color: #f2c94c;
 }
 .poster__round {
-  background: #0c1714;
+  background: #13241f;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   padding: 14px;
@@ -848,7 +852,7 @@ button:disabled {
 }
 .poster-pick {
   align-items: center;
-  background: #14231f;
+  background: #1d302b;
   border-radius: 4px;
   display: grid;
   font: 700 11px/1 var(--font-display);
@@ -904,7 +908,7 @@ button:disabled {
 
 .site-footer {
   border-top: 1px solid var(--line);
-  color: #64736d;
+  color: #81968e;
   display: flex;
   font-size: 12px;
   justify-content: space-between;
@@ -980,7 +984,7 @@ button:disabled {
     font-size: 50px;
   }
   .stage-nav {
-    background: rgba(7, 17, 15, 0.96);
+    background: rgba(11, 29, 25, 0.96);
     justify-content: stretch;
     position: sticky;
     top: 60px;
